@@ -2,7 +2,7 @@
 
 A **Level 1 AI Agent** that listens for new Pull Requests, summarizes them using OpenAI, and posts a comment as a bot.
 
-Find a full tutorial [here](https://www.jointakeoff.com/dashboard/courses/series-5-levels-of-agents-coding-agents) on Takeoff.
+Find a full tutorial [here](https://www.jointakeoff.com/courses/series-5-levels-of-agents-coding-agents) on Takeoff.
 
 ## Setup
 
