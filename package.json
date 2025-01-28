@@ -1,0 +1,32 @@
+{
+  "type": "module",
+  "name": "level-1-agent-code",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "example": "nodemon --exec \"tsx agent.ts\" --ext ts",
+    "start": "nodemon --exec \"tsx my-agent.ts\" --ext ts",
+    "start:prod": "tsx agent.ts"
+  },
+  "author": "Mckay Wrigley",
+  "license": "MIT",
+  "dependencies": {
+    "@ai-sdk/openai": "^1.1.5",
+    "@octokit/auth-app": "^7.1.4",
+    "@octokit/rest": "^21.1.0",
+    "@types/xml2js": "^0.4.14",
+    "ai": "^4.1.9",
+    "body-parser": "^1.20.3",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "smee-client": "^2.0.4",
+    "tsx": "^4.19.2",
+    "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "@types/body-parser": "^1.19.5",
+    "@types/express": "^5.0.0",
+    "nodemon": "^3.1.9"
+  }
+}
