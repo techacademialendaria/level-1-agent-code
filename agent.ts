@@ -5,7 +5,6 @@ import { generateText } from "ai";
 import bodyParser from "body-parser";
 import { config } from "dotenv";
 import express from "express";
-import SmeeClient from "smee-client";
 import { parseStringPromise } from "xml2js";
 
 // Load environment variables from .env.local file.
@@ -332,19 +331,6 @@ const app = express();
 
 // Use body-parser to handle JSON payloads in the webhook request.
 app.use(bodyParser.json());
-
-// If we have a "webhook proxy URL" (from Smee or similar), we can forward events from GitHub to our local server.
-const WEBHOOK_PROXY_URL = process.env.WEBHOOK_PROXY_URL;
-if (WEBHOOK_PROXY_URL) {
-  // We instantiate a Smee client, which listens at the proxy URL and forwards events to our local server.
-  const smee = new SmeeClient({
-    source: WEBHOOK_PROXY_URL,
-    target: `http://localhost:${process.env.PORT || 3000}/webhook`,
-    logger: console
-  });
-  smee.start();
-  console.log("Webhook proxy client started");
-}
 
 // A simple endpoint to indicate our bot is running.
 app.get("/", (req, res) => {
