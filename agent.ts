@@ -7,10 +7,9 @@ import { config } from "dotenv";
 import express from "express";
 import { parseStringPromise } from "xml2js";
 
-// Load environment variables from .env.local file.
+
 config({ path: ".env.local" });
 
-// This interface defines the data structure for each file that was changed in the pull request.
 interface FileChange {
   filename: string; // Name of the file (e.g., "src/index.js")
   patch: string; // The diff changes (the lines that were added/removed)
@@ -20,7 +19,6 @@ interface FileChange {
   content?: string; // The actual current content of the file (Base64-decoded)
 }
 
-// This interface defines the shape of our AI-generated code analysis results.
 interface CodeAnalysis {
   summary: string; // A short summary of the pull request changes
   fileAnalyses: {
@@ -30,51 +28,51 @@ interface CodeAnalysis {
   overallSuggestions: string[]; // High-level recommendations or suggestions
 }
 
-// Retrieve required environment variables. These are specific to the GitHub App and must be set.
 const APP_ID = process.env.GITHUB_APP_ID;
 const PRIVATE_KEY = process.env.GITHUB_PRIVATE_KEY;
 const INSTALLATION_ID = process.env.GITHUB_INSTALLATION_ID;
 
-// Simple check to ensure that all required environment variables are present.
 if (!APP_ID || !PRIVATE_KEY || !INSTALLATION_ID) {
   throw new Error(
     `Missing required environment variables:
     APP_ID: ${!!APP_ID}
     PRIVATE_KEY: ${!!PRIVATE_KEY}
-    INSTALLATION_ID: ${!!INSTALLATION_ID}`
+    INSTALLATION_ID: ${!!INSTALLATION_ID}`,
   );
 }
 
-// We also need the OpenAI API key to use the language model.
 if (!process.env.OPENAI_API_KEY) {
   throw new Error("Missing OPENAI_API_KEY environment variable.");
 }
 
-// This is our Octokit instance, which we'll use to interact with GitHub. It uses our GitHub App's credentials.
 const octokit = new Octokit({
   authStrategy: createAppAuth,
   auth: {
     appId: APP_ID,
     privateKey: PRIVATE_KEY,
-    installationId: INSTALLATION_ID
-  }
+    installationId: INSTALLATION_ID,
+  },
 });
 
-// This is our OpenAI instance, which we'll use for the AI text generation.
 const openai = createOpenAI({
   apiKey: process.env.OPENAI_API_KEY,
-  compatibility: "strict"
+  compatibility: "strict",
 });
 
-/**
- * Retrieves the content of a file from a GitHub repository at a specific reference (e.g., commit SHA).
- * If the file doesn't exist or can't be retrieved, returns undefined.
- */
-async function getFileContent(owner: string, repo: string, path: string, ref: string): Promise<string | undefined> {
+
+async function getFileContent(
+  owner: string,
+  repo: string,
+  path: string,
+  ref: string,
+): Promise<string | undefined> {
   try {
     const response = await octokit.repos.getContent({ owner, repo, path, ref });
     // The response might contain various data structures depending on the type of the file or folder.
-    if ("content" in response.data && typeof response.data.content === "string") {
+    if (
+      "content" in response.data &&
+      typeof response.data.content === "string"
+    ) {
       // Decode the file content from Base64 to a readable string.
       return Buffer.from(response.data.content, "base64").toString();
     }
@@ -90,10 +88,7 @@ async function getFileContent(owner: string, repo: string, path: string, ref: st
   }
 }
 
-/**
- * Parses an XML string that we expect to follow a <review> ... </review> format into a CodeAnalysis object.
- * If parsing fails or required fields are missing, we return a fallback structure with minimal info.
- */
+
 async function parseReviewXml(xmlText: string): Promise<CodeAnalysis> {
   try {
     // We find where the <review> tag starts and ends to parse just that section.
@@ -102,11 +97,13 @@ async function parseReviewXml(xmlText: string): Promise<CodeAnalysis> {
 
     // If we can't find the tags, we provide a fallback message.
     if (xmlStart === -1 || xmlEnd === -1) {
-      console.warn("Could not locate <review> tags in the AI response. Returning fallback.");
+      console.warn(
+        "Could not locate <review> tags in the AI response. Returning fallback.",
+      );
       return {
         summary: "AI analysis could not parse the response from the model.",
         fileAnalyses: [],
-        overallSuggestions: []
+        overallSuggestions: [],
       };
     }
 
@@ -117,12 +114,19 @@ async function parseReviewXml(xmlText: string): Promise<CodeAnalysis> {
     const parsed = await parseStringPromise(xmlResponse);
 
     // Check if the parsed structure has the fields we need.
-    if (!parsed.review || !parsed.review.summary || !parsed.review.fileAnalyses || !parsed.review.overallSuggestions) {
-      console.warn("Parsed XML is missing required fields. Returning fallback.");
+    if (
+      !parsed.review ||
+      !parsed.review.summary ||
+      !parsed.review.fileAnalyses ||
+      !parsed.review.overallSuggestions
+    ) {
+      console.warn(
+        "Parsed XML is missing required fields. Returning fallback.",
+      );
       return {
         summary: "AI analysis returned incomplete or invalid XML structure.",
         fileAnalyses: [],
-        overallSuggestions: []
+        overallSuggestions: [],
       };
     }
 
@@ -132,10 +136,16 @@ async function parseReviewXml(xmlText: string): Promise<CodeAnalysis> {
       fileAnalyses: Array.isArray(parsed.review.fileAnalyses[0].file)
         ? parsed.review.fileAnalyses[0].file.map((file: any) => ({
             path: file.path?.[0] ?? "Unknown file",
-            analysis: file.analysis?.[0] ?? ""
+            analysis: file.analysis?.[0] ?? "",
           }))
         : [],
-      overallSuggestions: Array.isArray(parsed.review.overallSuggestions[0].suggestion) ? parsed.review.overallSuggestions[0].suggestion.map((s: any) => s || "") : []
+      overallSuggestions: Array.isArray(
+        parsed.review.overallSuggestions[0].suggestion,
+      )
+        ? parsed.review.overallSuggestions[0].suggestion.map(
+            (s: any) => s || "",
+          )
+        : [],
     };
   } catch (err) {
     // In case of any error (e.g., malformed XML), log it and provide fallback data.
@@ -143,60 +153,72 @@ async function parseReviewXml(xmlText: string): Promise<CodeAnalysis> {
     return {
       summary: "We were unable to fully parse the AI-provided code analysis.",
       fileAnalyses: [],
-      overallSuggestions: []
+      overallSuggestions: [],
     };
   }
 }
 
-/**
- * Sends a request to our AI model with a prompt summarizing the pull request details, changed files,
- * and commit messages. The model then returns an XML-formatted review, which we parse into a CodeAnalysis object.
- */
-async function analyzeCode(title: string, changedFiles: FileChange[], commitMessages: string[]): Promise<CodeAnalysis> {
+async function analyzeCode(
+  title: string,
+  changedFiles: FileChange[],
+  commitMessages: string[],
+): Promise<CodeAnalysis> {
   // We build a prompt that asks the AI to return an XML-formatted code review for the provided changes.
-  const prompt = `You are an expert code reviewer. Analyze these pull request changes and provide detailed feedback.
-Write your analysis in clear, concise paragraphs. Do not use code blocks for regular text.
-Format suggestions as single-line bullet points.
+  const prompt = `Você é um especialista em revisão de código focado em prevenção de problemas. Analise estas mudanças de PR considerando especialmente:
+  1. Impacto no fluxo principal de atendimento (criação de agente → configuração → WhatsApp)
+  2. Potenciais problemas de performance (especialmente com banco de dados e webhook)
+  3. Riscos para experiência do usuário e estabilidade da plataforma 
+  4. Compatibilidade com múltiplos modelos de IA e integrações externas
 
-Context:
-PR Title: ${title}
-Commit Messages: 
-${commitMessages.map((msg) => `- ${msg}`).join("\n")}
+  Escreva sua análise em parágrafos claros e concisos. Não use blocos de código para texto regular.
+  Formate sugestões como itens de lista em uma única linha. Responda em português brasileiro como Rick Sanchez, com seu vocabulário ácido e palavrões.
 
-Changed Files:
-${changedFiles
-  .map(
-    (file) => `
-File: ${file.filename}
-Status: ${file.status}
-Diff:
-${file.patch}
+  Contexto do SuperAgents:
+  - Fluxos críticos: integração WhatsApp (Evolution/QR e ZAPI), Google Calendar, modelos de IA
+  - Problemas conhecidos: performance do DataStore, race conditions no webhook, tempo de resposta
+  - Foco atual: estabilidade em vez de novas funcionalidades, experiência do usuário
 
-Current Content:
-${file.content || "N/A"}
-`
-  )
-  .join("\n---\n")}
+  Context:
+  PR Title: ${title}
+  Commit Messages: 
+  ${commitMessages.map((msg) => '- ' + msg).join('\\n')}
+  Changed Files:
+  ${changedFiles
+    .map(
+      (file) => `
+  File: ${file.filename}
+  Status: ${file.status}
+  Diff:
+  ${file.patch}
+  Current Content:
+  ${file.content || "N/A"}
+  `,
+    )
+    .join("\\n---\\n")}
 
-Provide your review in the following XML format:
-<review>
-  <summary>Write a clear, concise paragraph summarizing the changes</summary>
-  <fileAnalyses>
-    <file>
-      <path>file path</path>
-      <analysis>Write analysis as regular paragraphs, not code blocks</analysis>
-    </file>
-  </fileAnalyses>
-  <overallSuggestions>
-    <suggestion>Write each suggestion as a single line</suggestion>
-  </overallSuggestions>
-</review>;`;
+  Forneça sua revisão no seguinte formato XML:
+  <review>
+    <summary>Escreva um parágrafo resumindo as mudanças e possíveis impactos nos fluxos críticos</summary>
+    <fluxoImpact>Avalie o impacto específico no fluxo principal de atendimento</fluxoImpact>
+    <performanceImpact>Avalie potenciais problemas de performance</performanceImpact>
+    <fileAnalyses>
+      <file>
+        <path>caminho do arquivo</path>
+        <analysis>Análise em parágrafos regulares, não blocos de código</analysis>
+        <riskLevel>Alto|Médio|Baixo - justifique brevemente</riskLevel>
+      </file>
+    </fileAnalyses>
+    <overallSuggestions>
+      <suggestion>Escreva cada sugestão em uma única linha</suggestion>
+    </overallSuggestions>
+    <testingRecommendations>Recomendações específicas para testar essas mudanças antes do deploy</testingRecommendations>
+  </review>`;
 
   try {
     // Generate text using our OpenAI instance with the specified model (o1-mini in this example).
     const { text } = await generateText({
       model: openai("o1"),
-      prompt
+      prompt,
     });
 
     // Parse the text the AI returned to extract the structured review in XML.
@@ -207,31 +229,33 @@ Provide your review in the following XML format:
     return {
       summary: "We were unable to analyze the code due to an internal error.",
       fileAnalyses: [],
-      overallSuggestions: []
+      overallSuggestions: [],
     };
   }
 }
 
-/**
- * Posts a simple "placeholder" comment on the GitHub pull request, letting the user know we're analyzing the code.
- * Returns the comment ID so we can update it later once the analysis is complete.
- */
-async function postPlaceholderComment(owner: string, repo: string, pullNumber: number): Promise<number> {
+async function postPlaceholderComment(
+  owner: string,
+  repo: string,
+  pullNumber: number,
+): Promise<number> {
   const { data } = await octokit.issues.createComment({
     owner,
     repo,
     issue_number: pullNumber,
-    body: "PR Review Bot is analyzing your changes... Please wait."
+    body: "Desarmando essa bomba que você jogou aqui pra gente",
   });
   return data.id;
 }
 
-/**
- * Updates the placeholder comment with the final AI-generated review and suggestions.
- */
-async function updateCommentWithReview(owner: string, repo: string, commentId: number, analysis: CodeAnalysis) {
+async function updateCommentWithReview(
+  owner: string,
+  repo: string,
+  commentId: number,
+  analysis: CodeAnalysis,
+) {
   // We'll format the AI's analysis into a markdown comment.
-  const finalReviewBody = `# Pull Request Review
+  const finalReviewBody = `# Tech Rick Lead
 
 ${analysis.summary.trim()}
 
@@ -242,29 +266,24 @@ ${file.analysis
   .split("\n")
   .map((line) => line.trim())
   .filter(Boolean)
-  .join("\n")}`
+  .join("\n")}`,
   )
   .join("\n\n")}
 
-## Suggestions for Improvement
+## Sugestões de Melhoria
 ${analysis.overallSuggestions.map((suggestion) => `• ${suggestion.trim()}`).join("\n")}
 
----
-*Generated by PR Review Bot*`;
+`;
 
   // Use GitHub's API to update the existing comment with our final review.
   await octokit.issues.updateComment({
     owner,
     repo,
     comment_id: commentId,
-    body: finalReviewBody
+    body: finalReviewBody,
   });
 }
 
-/**
- * Main handler for the "pull_request opened" event. Gathers info about the PR, calls AI for analysis,
- * and updates the PR with the results.
- */
 async function handlePullRequestOpened(payload: any) {
   // The payload object from GitHub contains info like repository owner, repo name, PR number, etc.
   const owner = payload.repository.owner.login;
@@ -275,13 +294,17 @@ async function handlePullRequestOpened(payload: any) {
 
   try {
     // Post a placeholder comment on the PR so the user knows the bot is working.
-    const placeholderCommentId = await postPlaceholderComment(owner, repo, pullNumber);
+    const placeholderCommentId = await postPlaceholderComment(
+      owner,
+      repo,
+      pullNumber,
+    );
 
     // List the changed files in the PR.
     const filesRes = await octokit.pulls.listFiles({
       owner,
       repo,
-      pull_number: pullNumber
+      pull_number: pullNumber,
     });
 
     // For each file, retrieve content if it isn't removed. Then build the FileChange structure.
@@ -292,7 +315,10 @@ async function handlePullRequestOpened(payload: any) {
           try {
             content = await getFileContent(owner, repo, file.filename, headRef);
           } catch (error) {
-            console.error(`Error retrieving content for ${file.filename}:`, error);
+            console.error(
+              `Error retrieving content for ${file.filename}:`,
+              error,
+            );
           }
         }
         return {
@@ -301,16 +327,16 @@ async function handlePullRequestOpened(payload: any) {
           status: file.status,
           additions: file.additions,
           deletions: file.deletions,
-          content
+          content,
         };
-      })
+      }),
     );
 
     // We also get the commit messages in the PR, which can help inform the AI's analysis.
     const commitsRes = await octokit.pulls.listCommits({
       owner,
       repo,
-      pull_number: pullNumber
+      pull_number: pullNumber,
     });
     const commitMessages = commitsRes.data.map((c) => c.commit.message);
 
@@ -320,24 +346,29 @@ async function handlePullRequestOpened(payload: any) {
     // Update our placeholder comment with the full review.
     await updateCommentWithReview(owner, repo, placeholderCommentId, analysis);
 
-    console.log(`Submitted code review for PR #${pullNumber} in ${owner}/${repo}`);
+    console.log(
+      `Submitted code review for PR #${pullNumber} in ${owner}/${repo}`,
+    );
   } catch (error) {
-    console.error(`Failed to handle 'pull_request' opened event for PR #${pullNumber}`, error);
+    console.error(
+      `Failed to handle 'pull_request' opened event for PR #${pullNumber}`,
+      error,
+    );
   }
 }
 
-// Create an Express application to serve our webhook endpoint.
+
 const app = express();
 
-// Use body-parser to handle JSON payloads in the webhook request.
+
 app.use(bodyParser.json());
 
-// A simple endpoint to indicate our bot is running.
+
 app.get("/", (req, res) => {
   res.send("PR Review Bot is running");
 });
 
-// The webhook endpoint GitHub (or the Smee proxy) calls when an event occurs in the repository.
+
 app.post("/webhook", async (req, res) => {
   try {
     // The event type is in the header. We're primarily looking for "pull_request" events.
@@ -356,7 +387,7 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// Start our server on the provided PORT, or fallback to 3000.
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`PR Review Bot listening on port ${PORT}`);
