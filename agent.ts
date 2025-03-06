@@ -1,4 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai";
+import { createAnthropic } from "@ai-sdk/anthropic";
 import { createAppAuth } from "@octokit/auth-app";
 import { Octokit } from "@octokit/rest";
 import { generateText } from "ai";
@@ -7,25 +8,29 @@ import { config } from "dotenv";
 import express from "express";
 import { parseStringPromise } from "xml2js";
 
-
 config({ path: ".env.local" });
 
 interface FileChange {
-  filename: string; // Name of the file (e.g., "src/index.js")
-  patch: string; // The diff changes (the lines that were added/removed)
-  status: string; // The status of the file (modified, added, removed, etc.)
-  additions: number; // Number of lines added
-  deletions: number; // Number of lines deleted
-  content?: string; // The actual current content of the file (Base64-decoded)
+  filename: string; // Nome do arquivo (ex.: "src/index.js")
+  patch: string; // As alterações em diff (linhas adicionadas/removidas)
+  status: string; // Status do arquivo (modificado, adicionado, removido, etc.)
+  additions: number; // Número de linhas adicionadas
+  deletions: number; // Número de linhas removidas
+  content?: string; // Conteúdo atual do arquivo (decodificado de Base64)
 }
 
 interface CodeAnalysis {
-  summary: string; // A short summary of the pull request changes
+  summary: string; // Um breve resumo das alterações do pull request
+  fluxoImpact: string; // Impacto no fluxo principal
+  performanceImpact: string; // Impacto na performance
   fileAnalyses: {
-    path: string; // The path to the file being discussed
-    analysis: string; // The AI's analysis for that file
+    path: string; // Caminho do arquivo analisado
+    analysis: string; // Análise da IA para esse arquivo
+    riskLevel: string; // Nível de risco (Alto, Médio, Baixo)
   }[];
-  overallSuggestions: string[]; // High-level recommendations or suggestions
+  overallSuggestions: string[]; // Recomendações ou sugestões de alto nível
+  testingRecommendations: string; // Recomendações de testes
+  testChecklist: string; // Checklist de testes formatado em markdown
 }
 
 const APP_ID = process.env.GITHUB_APP_ID;
@@ -58,7 +63,9 @@ const openai = createOpenAI({
   apiKey: process.env.OPENAI_API_KEY,
   compatibility: "strict",
 });
-
+const anthropic = createAnthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
 
 async function getFileContent(
   owner: string,
@@ -68,92 +75,108 @@ async function getFileContent(
 ): Promise<string | undefined> {
   try {
     const response = await octokit.repos.getContent({ owner, repo, path, ref });
-    // The response might contain various data structures depending on the type of the file or folder.
+    // A resposta pode conter várias estruturas de dados dependendo do tipo de arquivo ou pasta
     if (
       "content" in response.data &&
       typeof response.data.content === "string"
     ) {
-      // Decode the file content from Base64 to a readable string.
+      // Decodifica o conteúdo do arquivo de Base64 para uma string legível
       return Buffer.from(response.data.content, "base64").toString();
     }
     return undefined;
   } catch (error: any) {
     if (error.status === 404) {
-      // If the file wasn't found at that reference, log it out and return undefined.
+      // Se o arquivo não foi encontrado nessa referência, registre e retorne undefined
       console.log(`File ${path} not found at ref ${ref}`);
       return undefined;
     }
-    // If it's another error, rethrow it.
+    // Se for outro erro, relance-o
     throw error;
   }
 }
 
-
 async function parseReviewXml(xmlText: string): Promise<CodeAnalysis> {
   try {
-    // We find where the <review> tag starts and ends to parse just that section.
+    // Encontramos onde a tag <review> começa e termina para analisar apenas essa seção
     const xmlStart = xmlText.indexOf("<review>");
     const xmlEnd = xmlText.indexOf("</review>") + "</review>".length;
 
-    // If we can't find the tags, we provide a fallback message.
+    // Se não conseguirmos encontrar as tags, fornecemos uma mensagem de fallback
     if (xmlStart === -1 || xmlEnd === -1) {
       console.warn(
         "Could not locate <review> tags in the AI response. Returning fallback.",
       );
       return {
         summary: "AI analysis could not parse the response from the model.",
+        fluxoImpact: "Não foi possível analisar o impacto no fluxo.",
+        performanceImpact:
+          "Não foi possível analisar o impacto na performance.",
         fileAnalyses: [],
         overallSuggestions: [],
+        testingRecommendations:
+          "Não foi possível analisar as recomendações de teste.",
+        testChecklist: "Não foi possível gerar o checklist de testes.",
       };
     }
 
-    // Extract the portion of the string that contains the review XML.
+    // Extraímos a parte da string que contém o XML de revisão
     const xmlResponse = xmlText.slice(xmlStart, xmlEnd);
 
-    // We use the xml2js library to parse the XML into a JavaScript object.
+    // Usamos a biblioteca xml2js para converter o XML em um objeto JavaScript
     const parsed = await parseStringPromise(xmlResponse);
 
-    // Check if the parsed structure has the fields we need.
-    if (
-      !parsed.review ||
-      !parsed.review.summary ||
-      !parsed.review.fileAnalyses ||
-      !parsed.review.overallSuggestions
-    ) {
+    // Verificamos se a estrutura analisada tem os campos necessários
+    if (!parsed.review) {
       console.warn(
         "Parsed XML is missing required fields. Returning fallback.",
       );
       return {
         summary: "AI analysis returned incomplete or invalid XML structure.",
+        fluxoImpact: "Não foi possível analisar o impacto no fluxo.",
+        performanceImpact:
+          "Não foi possível analisar o impacto na performance.",
         fileAnalyses: [],
         overallSuggestions: [],
+        testingRecommendations:
+          "Não foi possível analisar as recomendações de teste.",
+        testChecklist: "Não foi possível gerar o checklist de testes.",
       };
     }
 
-    // Transform the parsed data into our CodeAnalysis interface shape.
+    // Transformamos os dados analisados para o formato da nossa interface CodeAnalysis
     return {
-      summary: parsed.review.summary[0] ?? "",
-      fileAnalyses: Array.isArray(parsed.review.fileAnalyses[0].file)
+      summary: parsed.review.summary?.[0] ?? "",
+      fluxoImpact: parsed.review.fluxoImpact?.[0] ?? "",
+      performanceImpact: parsed.review.performanceImpact?.[0] ?? "",
+      fileAnalyses: Array.isArray(parsed.review.fileAnalyses?.[0]?.file)
         ? parsed.review.fileAnalyses[0].file.map((file: any) => ({
             path: file.path?.[0] ?? "Unknown file",
             analysis: file.analysis?.[0] ?? "",
+            riskLevel: file.riskLevel?.[0] ?? "Médio",
           }))
         : [],
       overallSuggestions: Array.isArray(
-        parsed.review.overallSuggestions[0].suggestion,
+        parsed.review.overallSuggestions?.[0]?.suggestion,
       )
         ? parsed.review.overallSuggestions[0].suggestion.map(
             (s: any) => s || "",
           )
         : [],
+      testingRecommendations: parsed.review.testingRecommendations?.[0] ?? "",
+      testChecklist: parsed.review.testChecklist?.[0] ?? "",
     };
   } catch (err) {
-    // In case of any error (e.g., malformed XML), log it and provide fallback data.
+    // Em caso de erro (por exemplo, XML malformado), registre-o e forneça dados de fallback
     console.error("Error parsing AI-generated XML:", err);
     return {
       summary: "We were unable to fully parse the AI-provided code analysis.",
+      fluxoImpact: "Não foi possível analisar o impacto no fluxo.",
+      performanceImpact: "Não foi possível analisar o impacto na performance.",
       fileAnalyses: [],
       overallSuggestions: [],
+      testingRecommendations:
+        "Não foi possível analisar as recomendações de teste.",
+      testChecklist: "Não foi possível gerar o checklist de testes.",
     };
   }
 }
@@ -163,7 +186,7 @@ async function analyzeCode(
   changedFiles: FileChange[],
   commitMessages: string[],
 ): Promise<CodeAnalysis> {
-  // We build a prompt that asks the AI to return an XML-formatted code review for the provided changes.
+  // Construímos um prompt que pede à IA para retornar uma revisão de código formatada em XML
   const prompt = `Você é um especialista em revisão de código focado em prevenção de problemas. Analise estas mudanças de PR considerando especialmente:
   1. Impacto no fluxo principal de atendimento (criação de agente → configuração → WhatsApp)
   2. Potenciais problemas de performance (especialmente com banco de dados e webhook)
@@ -181,7 +204,7 @@ async function analyzeCode(
   Context:
   PR Title: ${title}
   Commit Messages: 
-  ${commitMessages.map((msg) => '- ' + msg).join('\\n')}
+  ${commitMessages.map((msg) => "- " + msg).join("\\n")}
   Changed Files:
   ${changedFiles
     .map(
@@ -212,43 +235,40 @@ async function analyzeCode(
       <suggestion>Escreva cada sugestão em uma única linha</suggestion>
     </overallSuggestions>
     <testingRecommendations>Recomendações específicas para testar essas mudanças antes do deploy</testingRecommendations>
+    <testChecklist>
+    Adicione aqui um checklist completo de testes em formato markdown. Inclua:
+    - Testes por área funcional/componente
+    - Testes para UI em temas claro/escuro
+    - Testes de regressão para funcionalidades existentes
+    - Áreas de alto risco que precisam de atenção especial
+    - Testes de responsividade/compatibilidade
+
+    Use checkboxes "[ ]" para cada item e organize em seções com títulos "## Seção"
+    </testChecklist>
   </review>
-  
-  Em seguida. Analise o código deste Pull Request e gere um checklist detalhado de testes para validação.
-
-Contexto: Este PR contém alterações visuais e funcionais em nossa aplicação web. Preciso de um checklist abrangente que me ajude a validar todas as mudanças de forma sistemática.
-
-Por favor:
-1. Agrupe os testes por área funcional ou tipo de componente
-2. Inclua testes específicos para mudanças de UI em diferentes temas (claro/escuro)
-3. Identifique testes de regressão necessários para garantir que funcionalidades existentes não foram afetadas
-4. Destaque áreas de alto risco que precisam de atenção especial
-5. Inclua testes de responsividade e compatibilidade entre navegadores quando relevante
-
-Formato desejado:
-- Use uma lista com checkboxes "[ ]" para cada item de teste
-- Organize os testes em seções lógicas com títulos em markdown (## Seção)
-- Mantenha as instruções claras e específicas
-- Inclua uma seção de "Testes de Regressão" para funcionalidades críticas
-
-Considere tanto testes funcionais quanto visuais em sua análise.`;
+  `;
 
   try {
-    // Generate text using our OpenAI instance with the specified model (o1-mini in this example).
+    // Geramos texto usando nossa instância do Anthropic (Claude)
     const { text } = await generateText({
-      model: openai("o1"),
+      model: anthropic("claude-3-7-sonnet-latest"),
       prompt,
     });
 
-    // Parse the text the AI returned to extract the structured review in XML.
+    // Analisamos o texto retornado pela IA para extrair a revisão estruturada em XML
     return await parseReviewXml(text);
   } catch (error) {
-    // If something goes wrong (AI call fails or parsing fails), return a fallback response.
+    // Se algo der errado (chamada à IA falha ou análise falha), retornamos uma resposta de fallback
     console.error("Error generating or parsing AI analysis:", error);
     return {
       summary: "We were unable to analyze the code due to an internal error.",
+      fluxoImpact: "Não foi possível analisar o impacto no fluxo.",
+      performanceImpact: "Não foi possível analisar o impacto na performance.",
       fileAnalyses: [],
       overallSuggestions: [],
+      testingRecommendations:
+        "Não foi possível analisar as recomendações de teste.",
+      testChecklist: "Não foi possível gerar o checklist de testes.",
     };
   }
 }
@@ -262,7 +282,7 @@ async function postPlaceholderComment(
     owner,
     repo,
     issue_number: pullNumber,
-    body: "Desarmando essa bomba que você jogou aqui pra gente",
+    body: "Desarmando essa bomba que você jogou aqui pra gente!!",
   });
   return data.id;
 }
@@ -273,14 +293,20 @@ async function updateCommentWithReview(
   commentId: number,
   analysis: CodeAnalysis,
 ) {
-  // We'll format the AI's analysis into a markdown comment.
+  // Formatamos a análise da IA em um comentário markdown
   const finalReviewBody = `# Tech Rick Lead
 
 ${analysis.summary.trim()}
 
+## Impacto no Fluxo Principal
+${analysis.fluxoImpact.trim()}
+
+## Impacto na Performance
+${analysis.performanceImpact.trim()}
+
 ${analysis.fileAnalyses
   .map(
-    (file) => `## ${file.path}
+    (file) => `## ${file.path} (Risco: ${file.riskLevel})
 ${file.analysis
   .split("\n")
   .map((line) => line.trim())
@@ -292,9 +318,14 @@ ${file.analysis
 ## Sugestões de Melhoria
 ${analysis.overallSuggestions.map((suggestion) => `• ${suggestion.trim()}`).join("\n")}
 
+## Recomendações de Teste
+${analysis.testingRecommendations.trim()}
+
+# Checklist de Testes
+${analysis.testChecklist.trim()}
 `;
 
-  // Use GitHub's API to update the existing comment with our final review.
+  // Usamos a API do GitHub para atualizar o comentário existente com nossa revisão final
   await octokit.issues.updateComment({
     owner,
     repo,
@@ -304,7 +335,7 @@ ${analysis.overallSuggestions.map((suggestion) => `• ${suggestion.trim()}`).jo
 }
 
 async function handlePullRequestOpened(payload: any) {
-  // The payload object from GitHub contains info like repository owner, repo name, PR number, etc.
+  // O objeto payload do GitHub contém informações como proprietário do repositório, nome do repo, número do PR, etc.
   const owner = payload.repository.owner.login;
   const repo = payload.repository.name;
   const pullNumber = payload.pull_request.number;
@@ -312,21 +343,21 @@ async function handlePullRequestOpened(payload: any) {
   const headRef = payload.pull_request.head.sha;
 
   try {
-    // Post a placeholder comment on the PR so the user knows the bot is working.
+    // Postamos um comentário placeholder no PR para que o usuário saiba que o bot está trabalhando
     const placeholderCommentId = await postPlaceholderComment(
       owner,
       repo,
       pullNumber,
     );
 
-    // List the changed files in the PR.
+    // Listamos os arquivos alterados no PR
     const filesRes = await octokit.pulls.listFiles({
       owner,
       repo,
       pull_number: pullNumber,
     });
 
-    // For each file, retrieve content if it isn't removed. Then build the FileChange structure.
+    // Para cada arquivo, recuperamos o conteúdo se ele não foi removido. Em seguida, construímos a estrutura FileChange
     const changedFiles: FileChange[] = await Promise.all(
       filesRes.data.map(async (file) => {
         let content: string | undefined;
@@ -351,7 +382,7 @@ async function handlePullRequestOpened(payload: any) {
       }),
     );
 
-    // We also get the commit messages in the PR, which can help inform the AI's analysis.
+    // Também obtemos as mensagens de commit no PR, o que pode ajudar a informar a análise da IA
     const commitsRes = await octokit.pulls.listCommits({
       owner,
       repo,
@@ -359,10 +390,10 @@ async function handlePullRequestOpened(payload: any) {
     });
     const commitMessages = commitsRes.data.map((c) => c.commit.message);
 
-    // Call our analyzeCode function to get the AI's review of these changes.
+    // Chamamos nossa função analyzeCode para obter a revisão da IA dessas alterações
     const analysis = await analyzeCode(title, changedFiles, commitMessages);
 
-    // Update our placeholder comment with the full review.
+    // Atualizamos nosso comentário placeholder com a revisão completa
     await updateCommentWithReview(owner, repo, placeholderCommentId, analysis);
 
     console.log(
@@ -376,25 +407,21 @@ async function handlePullRequestOpened(payload: any) {
   }
 }
 
-
 const app = express();
 
-
 app.use(bodyParser.json());
-
 
 app.get("/", (req, res) => {
   res.send("PR Review Bot is running");
 });
 
-
 app.post("/webhook", async (req, res) => {
   try {
-    // The event type is in the header. We're primarily looking for "pull_request" events.
+    // O tipo de evento está no cabeçalho. Estamos procurando principalmente eventos do tipo "pull_request"
     const eventType = req.headers["x-github-event"];
     const payload = req.body;
 
-    // For a "pull_request" event, if the action is "opened", we handle it with our function above.
+    // Para um evento "pull_request", se a ação for "opened", lidamos com ele usando nossa função acima
     if (eventType === "pull_request" && payload.action === "opened") {
       await handlePullRequestOpened(payload);
     }
@@ -405,7 +432,6 @@ app.post("/webhook", async (req, res) => {
     res.status(500).send("Internal Server Error");
   }
 });
-
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
