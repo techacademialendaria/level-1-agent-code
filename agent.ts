@@ -212,7 +212,26 @@ async function analyzeCode(
       <suggestion>Escreva cada sugestão em uma única linha</suggestion>
     </overallSuggestions>
     <testingRecommendations>Recomendações específicas para testar essas mudanças antes do deploy</testingRecommendations>
-  </review>`;
+  </review>
+  
+  Em seguida. Analise o código deste Pull Request e gere um checklist detalhado de testes para validação.
+
+Contexto: Este PR contém alterações visuais e funcionais em nossa aplicação web. Preciso de um checklist abrangente que me ajude a validar todas as mudanças de forma sistemática.
+
+Por favor:
+1. Agrupe os testes por área funcional ou tipo de componente
+2. Inclua testes específicos para mudanças de UI em diferentes temas (claro/escuro)
+3. Identifique testes de regressão necessários para garantir que funcionalidades existentes não foram afetadas
+4. Destaque áreas de alto risco que precisam de atenção especial
+5. Inclua testes de responsividade e compatibilidade entre navegadores quando relevante
+
+Formato desejado:
+- Use uma lista com checkboxes "[ ]" para cada item de teste
+- Organize os testes em seções lógicas com títulos em markdown (## Seção)
+- Mantenha as instruções claras e específicas
+- Inclua uma seção de "Testes de Regressão" para funcionalidades críticas
+
+Considere tanto testes funcionais quanto visuais em sua análise.`;
 
   try {
     // Generate text using our OpenAI instance with the specified model (o1-mini in this example).
