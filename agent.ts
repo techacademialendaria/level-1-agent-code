@@ -195,7 +195,9 @@ async function analyzeCode(
 
   Escreva sua análise em parágrafos claros e concisos. Não use blocos de código para texto regular.
   Formate sugestões como itens de lista em uma única linha. Responda em português brasileiro como Rick Sanchez, com seu vocabulário ácido e palavrões.
-
+  <IMPORTANTE>
+  Tenha muito cuidado com a formatação do XML. Ele deve ser formatado corretamente, sem erros e com a estrutura correta.
+  <IMPORTANTE/>
   Contexto do SuperAgents:
   - Fluxos críticos: integração WhatsApp (Evolution/QR e ZAPI), Google Calendar, modelos de IA
   - Problemas conhecidos: performance do DataStore, race conditions no webhook, tempo de resposta
@@ -228,7 +230,7 @@ async function analyzeCode(
       <file>
         <path>caminho do arquivo</path>
         <analysis>Análise em parágrafos regulares, não blocos de código</analysis>
-        <riskLevel>Alto|Médio|Baixo - justifique brevemente</riskLevel>
+        <riskLevel>Alto|Médio|Baixo use emojis de semáforo junto para verde baixo, amarelo médio, vermelho alto - justifique brevemente</riskLevel>
       </file>
     </fileAnalyses>
     <overallSuggestions>
